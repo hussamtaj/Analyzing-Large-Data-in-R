@@ -1,0 +1,264 @@
+8---
+title: "STAT 474 -- Term Project"
+subtitle: "Airlines On-time Performance"
+author: "ABENEZER ACHMANO!!"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+library(tidyverse)
+library(RSQLite)
+```
+
+## Instructions
+
+The goal of this project is to analyze a large data set (i.e., larger than the current memory capacity) with the help of SQL database system. The data consists of flight arrival and departure details for all commercial flights within the USA, from October 1987 to April 2008. This is a large dataset: there are nearly 120 million records in total, and takes up 1.6 gigabytes of space compressed and 12 gigabytes when uncompressed. The challenge for this project is to provide a graphical summary of important features of the data set. 
+
+## Getting started with data collection
+
+Flight data can be obtained from the website: http://stat-computing.org/dataexpo/2009/the-data.html. First, you are asked to download those files to your computer automatically:
+
+**Question 1:** Write R codes to automatically download all the data files.
+
+```{r}
+# Your codes go here
+library(rvest)
+
+for(year in 1987:2008){
+  
+  URL<-str_c("http://stat-computing.org/dataexpo/2009/",year,".csv.bz2")
+  dest<-str_c("data",year,".csv.bz2")
+  download.file(URL,dest)
+}
+```
+
+*Note:* You don't need to unzip those files as the function `read_csv()` can read the compressed file into R. 
+
+Once all the files are ready, we set up and import all of them into SQLite database. The following create a table named `ontime` with an appropriate schema:
+
+```{r}
+con <- dbConnect(SQLite(), dbname = "ontime_sqlite.db")
+dbSendQuery(con, '
+create table ontime (
+  Year int,
+  Month int,
+  DayofMonth int,
+  DayOfWeek int,
+  DepTime  int,
+  CRSDepTime int,
+  ArrTime int,
+  CRSArrTime int,
+  UniqueCarrier varchar(5),
+  FlightNum int,
+  TailNum varchar(8),
+  ActualElapsedTime int,
+  CRSElapsedTime int,
+  AirTime int,
+  ArrDelay int,
+  DepDelay int,
+  Origin varchar(3),
+  Dest varchar(3),
+  Distance int,
+  TaxiIn int,
+  TaxiOut int,
+  Cancelled int,
+  CancellationCode varchar(1),
+  Diverted varchar(1),
+  CarrierDelay int,
+  WeatherDelay int,
+  NASDelay int,
+  SecurityDelay int,
+  LateAircraftDelay int
+);        
+')
+```
+
+The function `dbWriteTable()` allows us to write, overwrite or append a data frame to a database table. For example: If you want to import the data frame `iris` to the database with the same table name, you can use:
+
+```{r}
+dbWriteTable(con, "iris", iris)
+dbGetQuery(con, '
+SELECT * FROM iris;
+')
+```
+
+*Note:* If the table exists in the database, the function `dbWriteTable()` will return with an error message. To append a data frame to the database table, you need to add an argument `append = TRUE` to the function.
+
+**Question 2:** Write a loop to iteratively (1) read one data file, (2) import the data to database table, then (3) remove the data file from R (so that you have enough memory space for the next data file)
+
+```{r}
+# Your codes go here
+for (year in 1987:2008){
+  name<-str_c("data",year,".csv.bz2")
+  theData<-read_csv(name)
+  
+  dbWriteTable(con,"ontime",theData,append=TRUE)
+}
+rm(theData)
+#dbGetQuery(con, 'DELETE FROM ontime ;')
+dbGetQuery(con, 'SELECT * FROM ontime LIMIT 5;')
+dbGetQuery(con, 'SELECT COUNT(*) FROM ontime;')
+
+##step1 get the files(read.csv()
+##step2 load to sqldb  (dbwritetable())
+##step3 remove it from r 
+##step 4 loop
+
+
+
+
+```
+
+Additional data sets about the airports and the airline carriers are also available on the Blackboard. It might be beneficial to also import those data sets into R.
+
+```{r}
+# Your codes to import the data sets.
+airport<-read_csv("airports.csv")
+planeData<-read_csv("plane-data.csv")
+carriers<-read_csv("carriers.csv")
+
+
+
+```
+
+
+## Overview of the congestion in the sky
+
+Nowsaday, it's become easier for everyone to travel to everywhere via airplanes thanks to the affordability of this mode of transportation. In this section, we explore such change via time and locations.
+
+**Question 3:** Query from the database and create an appropriate plot to demonstrate the average daily number of flights in the U.S. over the period 1987-2009. Does your chart indicate the increasing in number of flights?
+
+```{r}
+# Your codes go here
+
+#wwhen using dbGetquery assign it to a variable
+
+dailyFlights<-dbGetQuery(con, 'SELECT COUNT(*),Year,Month,DayofMonth FROM ontime
+           GROUP BY  Year,Month,DayofMonth;')
+View(dailyFlights)
+dailyFlights<-dailyFlights %>% rename(noOfflights= `COUNT(*)`)
+
+avgMonthlyFlights<-dailyFlights %>% group_by(Year,Month) %>% summarise(flightPermonth=sum(noOfflights))
+View(avgMonthlyFlights)
+
+avgMonthlyFlights %>% group_by(Year)
+ggscatter(avgMonthlyFlights %>% group_by(Year), x= "Year", y="flightPermonth" ,title = "Regression of plans on minorities"
+          ,add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Yearr", ylab = "flightspermonth")
+avgMonthlyFlights %>%unite(YandM,Year,Month)
+ggplot(avgMonthlyFlights %>%unite(YandM,Year,Month))+
+  geom_point(mapping=aes(x=YandM, y= flightPermonth))
+  geom_bar()
+
+ggplot
+```
+This chart indicates a smooth growth on the average number of daily flight through out the years 1987-2008
+
+
+Flights might be canceled or delayed due to variety of reasons, which cause a lot inconvenience for customers and impact on carriers' operation. While any delays are bad for customers, some are more negative than the others. In this project, we define a bad delay as ones whose departure delay is 30 minutes or more. 
+
+**Question 4:** We want to explore the change in the rate of delays and the rate of canceled flights over time. Query from the database such information each day and create a chart to summarise the information.
+
+```{r}
+# Your codes goes here
+
+
+delayAndCancelled<-dbGetQuery(con, 'SELECT AVG(DepDelay>30), AVG(Cancelled=1),year FROM ontime
+           GROUP BY  Year;')
+
+
+View(delayAndCancelled)
+delayAndCancelled<-delayAndCancelled %>% rename(depDelay= `AVG(DepDelay>30)`,cancelled=`AVG(Cancelled=1)`)
+
+ggscatter(delayAndCancelled, x= "Year", y="depDelay" ,title = "Regression of depDelay on year"
+          ,add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Year", ylab = "rateDepDelay")
+
+ggscatter(delayAndCancelled, x= "Year", y="cancelled" ,title = "Regression of depDelay on year"
+          ,add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Year", ylab = "rateCancelled")
+
+
+ggplot(delayAndCancelled)+
+  geom_point(mapping=aes(x=Year, y= cancelled))
+ggplot(delayAndCancelled)+
+  geom_col(mapping=aes(x=Year, y= depDelay))
+
+```
+
+## On your own
+
+You are asked to explore the data set on your own regarding three following effects (at least one question either listed here or your choice) 
+
+1. Delays/cancellation involving time (temporal effects): Here are a few questions that you can work on
+
+    - Are some time periods more prone to delays than others?
+    - Relationships between delays and seasonal factors (winter, summer, holidays) or daily factors (time of day, day of week).
+```{r}
+delay<-dbGetQuery(con, 'SELECT AVG(DepDelay>30),DayofMonth,Month,Year FROM ontime
+           GROUP BY  Year,Month,DayOfMonth;')
+View(delay)
+
+delay<-delay %>% rename(proportionofDelay= `AVG(DepDelay>30)`)
+avgDelaypermonth<-delay %>% group_by(Month,Year) %>% summarise(avgDelay=mean(proportionofDelay))
+
+View(avgDelaypermonth) 
+avgDelaypermonth %>% unite(YearMonth, Year,Month)
+ggplot(avgDelaypermonth %>% unite(YearMonth, Year,Month))+
+  geom_point(mapping=aes(x=YearMonth, y= avgDelay))
+
+avgDelaypermonth %>% filter(Month==12|Month==11|Month==10)
+ggplot(avgDelaypermonth %>% filter(Month==12|Month==11|Month==10|Month==6|Month==7|Month==8))+
+  geom_col(mapping=aes(x=Month, y= avgDelay))
+
+```
+As we can infer from the above graph flights in decemeber are the most delayed. In addition except for December winter has lower rates of delayed flights than summer.
+    
+    
+2. Delays/cancellation involving locations (spatial effects):
+
+    - Are some airports more prone to delays than others? Hubs versus non-hubs?
+    - Are there differences between flying into an hub airport and flying out?
+    - Which airport are more congested?
+```{r}
+View(airport)
+hub<-dbGetQuery(con,'SELECT AVG(DepDelay>30),AVG(cancelled=1),Origin FROM ontime
+           GROUP BY Origin ;')
+hub<-hub %>% rename(depDelay= `AVG(DepDelay>30)`,cancelled=`AVG(cancelled=1)`)
+hub<-hub %>% mutate(hub1= ifelse(Origin=='LGA'|Origin=='BOS'|Origin=='JFK'|Origin=='DTW'|Origin=='CVG'|Origin=='ATL'|Origin=='MSP'|Origin=='SLC'|Origin=='SEA'|Origin=='LAX'|Origin=='DFW','yes','no'))
+View(hub)
+
+
+ggplot(hub)+
+  geom_boxplot(mapping=aes(x=hub1, y= depDelay))
+
+
+
+
+```
+
+From the above Boxplot we can understand that the hub airports on average have higher departure delay times. They are more congested and the time of delay is more consistent, However the non hub airports show outliers which means the delay times can be unexpectdely higher.
+3. Delays/cancellation involveing carriers:
+
+    - Are some carriers more prone to delays than others? Small/regional versus large carriers?
+```{r}
+View(carriers)
+
+carr<-dbGetQuery(con,'SELECT AVG(DepDelay>30),AVG(cancelled=1),UniqueCarrier FROM ontime
+          GROUP BY UniqueCarrier;')
+View(carr)
+carr<-carr %>% left_join(carriers,by=c("UniqueCarrier"="Code")) 
+carr<-carr %>% rename(depDelay= `AVG(DepDelay>30)`,cancelled=`AVG(cancelled=1)`)
+
+carr<-carr %>% mutate(bigairline= ifelse(UniqueCarrier=='AA'|UniqueCarrier=='AS'|UniqueCarrier=='DL'|UniqueCarrier=='UA'|UniqueCarrier=='US'|UniqueCarrier=='G4'|UniqueCarrier=='NK','yes','no'))
+View(hub)
+ggplot(carr)+
+  geom_col(mapping=aes(x=UniqueCarrier, y= depDelay,fill=bigairline))
+ggplot(carr)+
+  geom_col(mapping=aes(x=UniqueCarrier, y= cancelled))
+```
+From the above two graphs we can understand that regional airlines are more prone to cancellation and delay of flights.
